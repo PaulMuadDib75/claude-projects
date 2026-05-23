@@ -265,7 +265,7 @@ def show_change_form(root, filepath):
             description,
             reason,
             authorized,
-            filepath,
+            Path(filepath).name,
         ]
         with open(LOG_FILE, "a", newline="", encoding="utf-8") as f:
             csv.writer(f).writerow(row)
@@ -275,10 +275,13 @@ def show_change_form(root, filepath):
         win.destroy()
 
     # -----------------------------------------------------------------------
-    # Submit button
+    # Button row — Submit on the left, Cancel on the right
     # -----------------------------------------------------------------------
+    btn_frame = tk.Frame(win)
+    btn_frame.grid(row=8, column=0, columnspan=2, pady=15)
+
     tk.Button(
-        win,
+        btn_frame,
         text="Submit Change",
         font=FONT_BOLD,
         bg="#0078d4",
@@ -288,7 +291,30 @@ def show_change_form(root, filepath):
         padx=20,
         pady=8,
         command=on_submit,
-    ).grid(row=8, column=0, columnspan=2, pady=15)
+    ).pack(side="left", padx=10)
+
+    def on_cancel():
+        """Ask for confirmation before discarding the entry."""
+        confirmed = messagebox.askyesno(
+            "Cancel Entry",
+            "Cancel this entry?\n\nThe change will NOT be logged.",
+            parent=win,
+        )
+        if confirmed:
+            win.destroy()
+
+    tk.Button(
+        btn_frame,
+        text="Cancel",
+        font=FONT_BOLD,
+        bg="#d0d0d0",
+        fg="#333333",
+        activebackground="#b0b0b0",
+        activeforeground="#333333",
+        padx=20,
+        pady=8,
+        command=on_cancel,
+    ).pack(side="left", padx=10)
 
 
 # ---------------------------------------------------------------------------
