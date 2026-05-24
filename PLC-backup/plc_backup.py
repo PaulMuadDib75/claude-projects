@@ -71,6 +71,11 @@ LOCAL_BACKUP = r"C:\Python\NAS_Backups\PLC"
 # TODO: FILL IN BEFORE USING — update this to match LOCAL_BACKUP above
 LOG_FILE = r"Z:\PLC_Programs\plc_backup_log.txt"
 
+# Path to the PLC change-watcher CSV — included in every backup so each
+# snapshot also captures the change history recorded at that point in time.
+# TODO: Update this path if plc_change_watcher.py is ever moved.
+CHANGE_LOG = r"C:\Python\PLC-change-watcher\plc_change_log.csv"
+
 
 # =============================================================================
 # FUNCTION: get_timestamp_folder_name
@@ -425,6 +430,14 @@ def run_backup():
         # Both destinations failed, so nas_ok and local_ok are False.
         return (set(), False, False, 0)
 
+    # Snapshot the most recent existing backup folder for each destination
+    # BEFORE creating today's new folders.  After copy_files_to_destination()
+    # runs, the new folder will contain .ACD files and find_latest_backup_folder()
+    # would return it instead — so we capture the previous paths here for the
+    # incremental check used later when copying the change log.
+    prev_nas_backup   = find_latest_backup_folder(NAS_BACKUP)
+    prev_local_backup = find_latest_backup_folder(LOCAL_BACKUP)
+
     # --- Step 3: Copy to NAS ---
     # The entire NAS copy is wrapped in try/except so if the NAS is
     # offline or unreachable, we catch that error and keep going.
@@ -469,7 +482,61 @@ def run_backup():
         local_count = 0       # No files were copied if the whole backup failed
         local_unchanged = []  # No unchanged list if the whole backup failed
 
-    # --- Step 5: Print final summary ---
+    # --- Step 5: Copy the change log CSV into both backup folders ---
+    # The change log is maintained by plc_change_watcher.py and records every
+    # operator-documented change.  Including it in each backup snapshot means
+    # the archived copy reflects what was known at the time of that backup.
+    # Incremental rule: skip if mtime matches the copy in the previous backup.
+    # No popup is shown for this file — just log UNCHANGED and move on.
+    print("\nCopying change log...")
+    log_lines.append("\n[CHANGE LOG BACKUP]")
+    log_lines.append(f"  Source: {CHANGE_LOG}")
+
+    _change_log_name = os.path.basename(CHANGE_LOG)
+
+    for _dest_root, _dest_label, _prev_backup in [
+        (NAS_BACKUP,   "NAS",   prev_nas_backup),
+        (LOCAL_BACKUP, "Local", prev_local_backup),
+    ]:
+        _dest_folder = os.path.join(_dest_root, folder_name)
+
+        # If the backup folder was never created (e.g. destination offline), skip
+        if not os.path.isdir(_dest_folder):
+            log_lines.append(
+                f"  WARNING ({_dest_label}): Backup folder not found — "
+                f"skipping change log copy"
+            )
+            continue
+
+        # If the change log source file does not exist, warn and continue
+        if not os.path.exists(CHANGE_LOG):
+            log_lines.append(
+                f"  WARNING ({_dest_label}): Change log not found — {CHANGE_LOG}"
+            )
+            continue
+
+        # Compare mtime against the copy in the previous backup, if one exists
+        _prev_file = (
+            os.path.join(_prev_backup, _change_log_name) if _prev_backup else None
+        )
+        if (_prev_file
+                and os.path.exists(_prev_file)
+                and os.path.getmtime(CHANGE_LOG) == os.path.getmtime(_prev_file)):
+            log_lines.append(
+                f"  UNCHANGED (skipped): {_change_log_name} ({_dest_label})"
+            )
+            continue
+
+        try:
+            shutil.copy2(CHANGE_LOG, os.path.join(_dest_folder, _change_log_name))
+            log_lines.append(f"  COPIED: {_change_log_name} ({_dest_label})")
+        except Exception as _copy_error:
+            log_lines.append(
+                f"  WARNING ({_dest_label}): Could not copy "
+                f"{_change_log_name} — {_copy_error}"
+            )
+
+    # --- Step 6: Print final summary ---
     print("\n" + "=" * 50)
     print("SUMMARY")
     print("=" * 50)
@@ -496,7 +563,7 @@ def run_backup():
             f"{', '.join(sorted(unchanged_acd_set))}"
         )
 
-    # --- Step 6: Write everything to the log file ---
+    # --- Step 7: Write everything to the log file ---
     write_log(LOG_FILE, log_lines)
     print("\nLog file updated.")
 
