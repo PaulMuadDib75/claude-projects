@@ -45,7 +45,7 @@ CSV_HEADERS = [
 ]
 
 # How many seconds must pass before the same file can trigger another popup
-DEBOUNCE_SECONDS = 30
+DEBOUNCE_SECONDS = 60
 
 # Font used for all widgets — minimum 12pt for plant-floor readability
 FONT = ("Arial", 13)
@@ -56,6 +56,13 @@ READONLY_BG = "#e8e8e8"
 
 # Background colour used to highlight empty required fields on a failed submit
 HIGHLIGHT_BG = "#fff3cd"
+
+# Monitor 2 starts at X=1920 (monitor 1 is 1920px wide, positioned to the left)
+# Popup will be centered on monitor 2 (1920x1080)
+MONITOR_2_X = 1920
+MONITOR_2_Y = 0
+MONITOR_2_WIDTH = 1920
+MONITOR_2_HEIGHT = 1080
 
 
 # ---------------------------------------------------------------------------
@@ -103,8 +110,10 @@ class PLCChangeHandler(FileSystemEventHandler):
 
         path = event.src_path
 
-        # Only care about RSLogix 5000 project files
-        if Path(path).suffix.upper() != ".ACD":
+        # Only care about the real RSLogix project files
+        # Real files use uppercase .ACD extension
+        # Backup files created by RSLogix use lowercase .acd — ignore those
+        if Path(path).suffix != ".ACD":
             return
 
         # Debounce: RSLogix sometimes fires several modified events per save.
@@ -139,9 +148,20 @@ def show_change_form(root, filepath):
     win = tk.Toplevel(root)
     win.title("PLC Change Log")
     win.resizable(False, False)
-    win.grab_set()          # Keep keyboard/mouse focus on this window
-    win.lift()              # Bring above other windows (e.g. RSLogix)
-    win.focus_force()       # Pull focus even from a background application
+    win.grab_set()                      # Keep keyboard/mouse focus on this window
+    win.attributes('-topmost', True)    # Force window above ALL other windows
+
+    # Center the popup on monitor 2
+    # update_idletasks() forces tkinter to calculate the window size first
+    win.update_idletasks()
+    win_w = win.winfo_reqwidth()
+    win_h = win.winfo_reqheight()
+    x = MONITOR_2_X + (MONITOR_2_WIDTH - win_w) // 2
+    y = MONITOR_2_Y + (MONITOR_2_HEIGHT - win_h) // 2
+    win.geometry(f"+{x}+{y}")
+
+    win.lift()                          # Bring above other windows
+    win.focus_force()                   # Pull focus even from a background application
 
     # Common grid padding applied to every row
     PAD = {"padx": 15, "pady": 8}
