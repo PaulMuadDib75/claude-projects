@@ -23,6 +23,14 @@
 import tkinter as tk  # tkinter is Python's built-in GUI toolkit (standard library)
 
 
+# Monitor 2 starts at X=1920 (monitor 1 is 1920px wide, on the left)
+# Popup will be centered on monitor 2 (1920x1080)
+MONITOR_2_X = 1920
+MONITOR_2_Y = 0
+MONITOR_2_WIDTH = 1920
+MONITOR_2_HEIGHT = 1080
+
+
 # =============================================================================
 # FUNCTION: show_warning
 # =============================================================================
@@ -55,24 +63,8 @@ def show_warning(unchanged_files, run_backup_callback):
     file_count = len(unchanged_files)
     window_height = min(300 + max(0, (file_count - 5) * 20), 600)
 
-    # Force tkinter to calculate window geometry before we try to center it
-    root.update_idletasks()
-
-    # Get the full screen dimensions so we can place the window in the center
-    screen_width = root.winfo_screenwidth()
-    screen_height = root.winfo_screenheight()
-
-    # Calculate the top-left corner position to center the window on screen
-    x_position = (screen_width - window_width) // 2
-    y_position = (screen_height - window_height) // 2
-
-    # Apply the size and position.
-    # tkinter geometry strings look like "500x300+600+400":
-    #   500  = window width in pixels
-    #   300  = window height in pixels
-    #   +600 = distance from left edge of screen
-    #   +400 = distance from top edge of screen
-    root.geometry(f"{window_width}x{window_height}+{x_position}+{y_position}")
+    # Set the window size
+    root.geometry(f"{window_width}x{window_height}")
 
     # Prevent the operator from resizing the window — keeps the layout clean
     root.resizable(False, False)
@@ -210,6 +202,12 @@ def show_warning(unchanged_files, run_backup_callback):
     # --- Step 6: Start the event loop ---
     # mainloop() hands control to tkinter and waits for the operator to click a button.
     # It blocks here until root.destroy() is called — by either on_run_again or on_cancel.
+    root.update_idletasks()
+    win_w = root.winfo_reqwidth()
+    win_h = root.winfo_reqheight()
+    x = MONITOR_2_X + (MONITOR_2_WIDTH - win_w) // 2
+    y = MONITOR_2_Y + (MONITOR_2_HEIGHT - win_h) // 2
+    root.geometry(f"+{x}+{y}")
     root.mainloop()
 
 
@@ -237,13 +235,6 @@ def show_success(nas_ok, local_ok, files_copied):
     root.geometry("400x250")     # Fixed size — summary fits comfortably here
     root.resizable(False, False) # Keep layout clean by preventing resizing
 
-    # Centre the window on screen (same pattern used in show_warning)
-    root.update_idletasks()
-    screen_width  = root.winfo_screenwidth()
-    screen_height = root.winfo_screenheight()
-    x_position = (screen_width  - 400) // 2
-    y_position = (screen_height - 250) // 2
-    root.geometry(f"400x250+{x_position}+{y_position}")
 
     # --- Step 2: "Backup Successful" header in green ---
     # Green text signals success — like a green pilot lamp meaning "circuit OK"
@@ -292,6 +283,12 @@ def show_success(nas_ok, local_ok, files_copied):
 
     # --- Step 5: Start the event loop ---
     # Blocks here until the operator clicks OK
+    root.update_idletasks()
+    win_w = root.winfo_reqwidth()
+    win_h = root.winfo_reqheight()
+    x = MONITOR_2_X + (MONITOR_2_WIDTH - win_w) // 2
+    y = MONITOR_2_Y + (MONITOR_2_HEIGHT - win_h) // 2
+    root.geometry(f"+{x}+{y}")
     root.mainloop()
 
 
