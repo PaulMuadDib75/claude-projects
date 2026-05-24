@@ -6,6 +6,7 @@ Backs up to a NAS and a local destination with every run.
 ## What It Does
 - Copies PLC program files from the active directory to two destinations
 - Only copies files that are new or changed since the last backup
+- Each file is compared against its own most recent backup individually
 - Warns the operator if programs have not been saved before backing up
 - Logs every run to a file on the NAS
 - Runs automatically via Windows Task Scheduler
@@ -23,7 +24,8 @@ Backs up to a NAS and a local destination with every run.
 
 ## How to Run Manually
 Double-click plc_backup.py or run from PowerShell:
-    python C:\NAS_Backups\plc_backup.py
+
+    python C:\Python\NAS_Backups\plc_backup.py
 
 ## How It Works
 1. Script runs manually or via Task Scheduler
@@ -34,15 +36,26 @@ Double-click plc_backup.py or run from PowerShell:
 6. Success popup confirms backup is complete
 
 ## Save Convention
+Standard save (first save of the day):
+
     ProgramName_YYYY_MM_DD.ACD
     Example: Rewash_2026_05_20.ACD
+
+Same-day saves use a letter suffix:
+
+    ProgramName_YYYY_MM_DDa.ACD
+    ProgramName_YYYY_MM_DDb.ACD
+    Example: Rewash_2026_05_20a.ACD
 
 ## Files
 - plc_backup.py   — main backup script
 - backup_popup.py — warning and success popup windows
 
+## Display
+Both popups appear on monitor 2 (right monitor).
+
 ## Task Scheduler
-Configured to run monthly. Uses pythonw.exe so no terminal
+Configured to run on a schedule. Uses pythonw.exe so no terminal
 window appears. Terminal must remain logged in at all times.
 
 ## Requirements
