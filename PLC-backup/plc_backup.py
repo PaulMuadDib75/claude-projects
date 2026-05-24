@@ -167,6 +167,63 @@ def find_latest_backup_folder(dest_root):
 
 
 # =============================================================================
+# FUNCTION: build_file_index
+# =============================================================================
+# Scans ALL backup subfolders inside dest_root, newest first, and returns a
+# dict mapping each filename to the full path of its most recent backed-up copy.
+#
+# This is the correct approach for incremental backups: because each run only
+# copies NEW or CHANGED files, a single "latest" folder is sparse and will be
+# missing files that haven't changed in a while.  By walking all folders from
+# newest to oldest, every file always has a valid baseline to compare against.
+#
+# Think of it like checking a row of dated archive boxes — if you need to know
+# the last time a specific drawing was filed, you scan from the most recent box
+# backwards until you find it, rather than only looking in the newest box.
+#
+# Parameters:
+#   dest_root — the root backup folder to scan (e.g. Z:\PLC_Programs)
+#
+# Returns:
+#   dict mapping filename -> full path to that file's most recent backup copy
+#   {} if no backup folders exist (first run) or dest_root is unreadable
+# =============================================================================
+
+def build_file_index(dest_root):
+    pattern = re.compile(r"^PLC_Backup_\d{4}-\d{2}-\d{2}_\d{4}$")
+
+    try:
+        all_entries = os.listdir(dest_root)
+    except Exception:
+        # dest_root doesn't exist yet or can't be read — first run
+        return {}
+
+    # Collect matching backup folder names and sort newest-first.
+    # Lexicographic sort works because the format is zero-padded YYYY-MM-DD_HHMM.
+    folders = sorted(
+        (e for e in all_entries
+         if os.path.isdir(os.path.join(dest_root, e)) and pattern.match(e)),
+        reverse=True
+    )
+
+    # Walk folders newest to oldest.  The first time we see a filename, record
+    # its path — that is the most recent backed-up copy of that file.
+    index = {}
+    for folder in folders:
+        folder_path = os.path.join(dest_root, folder)
+        try:
+            for filename in os.listdir(folder_path):
+                if filename not in index:
+                    full_path = os.path.join(folder_path, filename)
+                    if os.path.isfile(full_path):
+                        index[filename] = full_path
+        except Exception:
+            continue   # skip unreadable folders and keep scanning older ones
+
+    return index
+
+
+# =============================================================================
 # FUNCTION: _keep_latest_per_processor
 # =============================================================================
 # Filters the unchanged ACD list down to only the files that actually need
@@ -205,7 +262,7 @@ def _keep_latest_per_processor(unchanged_files, all_acd_files, backed_up_files):
     # so lexicographic order equals chronological order.
     latest = {}   # maps processor name -> (date_str, filename)
     for filename in all_acd_files:
-        match = re.match(r'^(.+?)_(\d{4}_\d{2}_\d{2})\.ACD$', filename, re.IGNORECASE)
+        match = re.match(r'^(.+?)_(\d{4}_\d{2}_\d{2}[a-z]?)\.ACD$', filename, re.IGNORECASE)
         if match:
             processor = match.group(1)   # e.g. "Rewash"
             date_str  = match.group(2)   # e.g. "2026_05_17"
@@ -223,7 +280,7 @@ def _keep_latest_per_processor(unchanged_files, all_acd_files, backed_up_files):
     # Files in unchanged_files that don't follow the dated naming convention
     # are kept unconditionally — no date comparison is possible for them
     for filename in unchanged_files:
-        if not re.match(r'^(.+?)_(\d{4}_\d{2}_\d{2})\.ACD$', filename, re.IGNORECASE):
+        if not re.match(r'^(.+?)_(\d{4}_\d{2}_\d{2}[a-z]?)\.ACD$', filename, re.IGNORECASE):
             result.append(filename)
 
     return result
@@ -260,13 +317,13 @@ def copy_files_to_destination(source, dest_root, folder_name, log_lines):
     # e.g. Z:\PLC_Backups\PLC_Backup_2026-05-17_0200
     dest_folder = os.path.join(dest_root, folder_name)
 
-    # Find the most recent existing backup folder BEFORE we create today's new one.
-    # We do this first so the folder we are about to create is not accidentally
-    # treated as the "previous" backup when comparing file timestamps.
-    prev_backup = find_latest_backup_folder(dest_root)
+    # Build an index mapping each filename to its most recent backed-up copy across
+    # ALL previous backup folders.  We do this before creating today's new folder so
+    # the folder we are about to make is not included in the index.
+    file_index = build_file_index(dest_root)
 
-    if prev_backup:
-        log_lines.append(f"  Comparing against previous backup: {os.path.basename(prev_backup)}")
+    if file_index:
+        log_lines.append("  Incremental mode — comparing each file against its most recent backup")
     else:
         log_lines.append("  No previous backup found — this is a first run, copying everything.")
 
@@ -318,7 +375,7 @@ def copy_files_to_destination(source, dest_root, folder_name, log_lines):
                 # not just the unchanged ones.
                 all_acd_files.append(item_name)
 
-                if prev_backup is None:
+                if not file_index:
                     # This is an ACD file, but there is no previous backup to compare against.
                     # This is a first run — copy everything.
                     try:
@@ -329,11 +386,11 @@ def copy_files_to_destination(source, dest_root, folder_name, log_lines):
                         log_lines.append(f"    WARNING: Could not copy {item_name} — {copy_error}")
 
                 else:
-                    # This is an ACD file and we have a previous backup to compare against.
-                    # Check if this file existed in the previous backup folder.
-                    prev_file = os.path.join(prev_backup, item_name)
+                    # Look up the most recent backed-up copy of this specific file
+                    # across all previous backup folders (not just the latest folder).
+                    prev_file = file_index.get(item_name)
 
-                    if not os.path.exists(prev_file):
+                    if prev_file is None:
                         # File is brand new — it did not exist in the last backup at all
                         try:
                             shutil.copy2(source_file, dest_file)
