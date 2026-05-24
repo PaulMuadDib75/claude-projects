@@ -169,43 +169,64 @@ def find_latest_backup_folder(dest_root):
 # =============================================================================
 # FUNCTION: _keep_latest_per_processor
 # =============================================================================
-# Given a list (or any iterable) of ACD filenames, return a new list that
-# contains only the most recently dated file for each processor.
+# Filters the unchanged ACD list down to only the files that actually need
+# a popup warning.
 #
-# Processor name = everything before the first _YYYY_ date pattern.
-#   "Rewash_2026_01_03.ACD"  →  processor "Rewash", date "2026_01_03"
-#   "Rewash_2026_05_17.ACD"  →  processor "Rewash", date "2026_05_17"
-#   → only "Rewash_2026_05_17.ACD" is kept.
+# Parameters:
+#   unchanged_files — ACD filenames that were skipped (not saved since last backup)
+#   all_acd_files   — every ACD filename processed this run (NEW, CHANGED, UNCHANGED)
+#   backed_up_files — set of ACD filenames that were NEW or CHANGED on at least
+#                     one destination this run (pass set() when not yet known)
 #
-# String comparison works for dates because YYYY_MM_DD is zero-padded and
-# consistent, so lexicographic order equals chronological order.
+# Logic:
+#   For each processor, find the most recently dated file across ALL processed
+#   files.  Only include it in the result if it is in unchanged_files AND was
+#   not backed up on any destination this run.
+#   If a processor's newest file was backed up as NEW or CHANGED this run, it
+#   will NOT appear in the popup — even if older files from that processor are
+#   unchanged.
 #
-# Files that don't match the expected pattern are kept unconditionally.
+#   Files that don't match the Processor_YYYY_MM_DD.ACD naming convention are
+#   kept unconditionally if they appear in unchanged_files.
+#
+# Example:
+#   all_acd_files   = ["Rewash_2026_01_03.ACD", "Rewash_2026_05_17.ACD"]
+#   unchanged_files = ["Rewash_2026_01_03.ACD"]   ← old file not re-saved
+#   → result is [] because the newest Rewash file WAS backed up this run.
 # =============================================================================
 
-def _keep_latest_per_processor(file_list):
+def _keep_latest_per_processor(unchanged_files, all_acd_files, backed_up_files):
     import re
 
-    # best maps each processor name to (date_string, filename)
-    best = {}
+    unchanged_set = set(unchanged_files)
 
-    for filename in file_list:
-        # Match: <processor>_YYYY_MM_DD.ACD  (case-insensitive extension)
+    # Find the most recently dated file per processor across ALL processed ACD files.
+    # String comparison is safe here because YYYY_MM_DD is zero-padded and consistent,
+    # so lexicographic order equals chronological order.
+    latest = {}   # maps processor name -> (date_str, filename)
+    for filename in all_acd_files:
         match = re.match(r'^(.+?)_(\d{4}_\d{2}_\d{2})\.ACD$', filename, re.IGNORECASE)
         if match:
             processor = match.group(1)   # e.g. "Rewash"
             date_str  = match.group(2)   # e.g. "2026_05_17"
-            # Keep this file if we haven't seen this processor yet,
-            # or if its date is later than the one we already have
-            if processor not in best or date_str > best[processor][0]:
-                best[processor] = (date_str, filename)
-        else:
-            # Doesn't follow the dated-name convention — keep it as-is.
-            # Use the full filename as the key so nothing is accidentally dropped.
-            best[filename] = ('', filename)
+            if processor not in latest or date_str > latest[processor][0]:
+                latest[processor] = (date_str, filename)
 
-    # Return just the filenames (discard the date strings used for comparison)
-    return [entry[1] for entry in best.values()]
+    result = []
+
+    # Include a processor's most-recent file only if it is unchanged AND was not
+    # backed up (NEW or CHANGED) on any destination this run
+    for _date_str, filename in latest.values():
+        if filename in unchanged_set and filename not in backed_up_files:
+            result.append(filename)
+
+    # Files in unchanged_files that don't follow the dated naming convention
+    # are kept unconditionally — no date comparison is possible for them
+    for filename in unchanged_files:
+        if not re.match(r'^(.+?)_(\d{4}_\d{2}_\d{2})\.ACD$', filename, re.IGNORECASE):
+            result.append(filename)
+
+    return result
 
 
 # =============================================================================
@@ -230,6 +251,8 @@ def _keep_latest_per_processor(file_list):
 #   success             — True if no errors occurred, False otherwise
 #   unchanged_acd_files — list of .ACD filenames that were skipped because
 #                         they have not been saved since the last backup
+#   all_acd_files       — list of every .ACD filename processed (NEW, CHANGED,
+#                         or UNCHANGED) — used by _keep_latest_per_processor
 # =============================================================================
 
 def copy_files_to_destination(source, dest_root, folder_name, log_lines):
@@ -250,6 +273,7 @@ def copy_files_to_destination(source, dest_root, folder_name, log_lines):
     files_copied = 0          # Counter — starts at zero, goes up for each file copied
     success = True            # Assume success unless something goes wrong
     unchanged_acd_files = []  # Collects names of .ACD files that have not changed
+    all_acd_files = []        # Collects names of every .ACD file processed this run
 
     try:
         # Create the new timestamped folder
@@ -288,47 +312,53 @@ def copy_files_to_destination(source, dest_root, folder_name, log_lines):
                 except Exception as copy_error:
                     log_lines.append(f"    WARNING: Could not copy {item_name} — {copy_error}")
 
-            elif prev_backup is None:
-                # This is an ACD file, but there is no previous backup to compare against.
-                # This is a first run — copy everything.
-                try:
-                    shutil.copy2(source_file, dest_file)
-                    files_copied += 1
-                    log_lines.append(f"    NEW (first run): {item_name}")
-                except Exception as copy_error:
-                    log_lines.append(f"    WARNING: Could not copy {item_name} — {copy_error}")
-
             else:
-                # This is an ACD file and we have a previous backup to compare against.
-                # Check if this file existed in the previous backup folder.
-                prev_file = os.path.join(prev_backup, item_name)
+                # Track every ACD file seen this run — needed by _keep_latest_per_processor
+                # to determine the most recently dated file per processor across ALL files,
+                # not just the unchanged ones.
+                all_acd_files.append(item_name)
 
-                if not os.path.exists(prev_file):
-                    # File is brand new — it did not exist in the last backup at all
+                if prev_backup is None:
+                    # This is an ACD file, but there is no previous backup to compare against.
+                    # This is a first run — copy everything.
                     try:
                         shutil.copy2(source_file, dest_file)
                         files_copied += 1
-                        log_lines.append(f"    NEW: {item_name}")
-                    except Exception as copy_error:
-                        log_lines.append(f"    WARNING: Could not copy {item_name} — {copy_error}")
-
-                elif os.path.getmtime(source_file) != os.path.getmtime(prev_file):
-                    # The file's "last modified" timestamp differs from the backup copy.
-                    # shutil.copy2() preserves timestamps, so a difference means the
-                    # operator saved this file in RSLogix 5000 since the last backup.
-                    try:
-                        shutil.copy2(source_file, dest_file)
-                        files_copied += 1
-                        log_lines.append(f"    CHANGED: {item_name}")
+                        log_lines.append(f"    NEW (first run): {item_name}")
                     except Exception as copy_error:
                         log_lines.append(f"    WARNING: Could not copy {item_name} — {copy_error}")
 
                 else:
-                    # The modified timestamp matches — this file has NOT been saved
-                    # since the last backup. Skip copying it and flag it so the
-                    # operator warning popup can alert them to save and re-run.
-                    log_lines.append(f"    UNCHANGED (skipped): {item_name}")
-                    unchanged_acd_files.append(item_name)
+                    # This is an ACD file and we have a previous backup to compare against.
+                    # Check if this file existed in the previous backup folder.
+                    prev_file = os.path.join(prev_backup, item_name)
+
+                    if not os.path.exists(prev_file):
+                        # File is brand new — it did not exist in the last backup at all
+                        try:
+                            shutil.copy2(source_file, dest_file)
+                            files_copied += 1
+                            log_lines.append(f"    NEW: {item_name}")
+                        except Exception as copy_error:
+                            log_lines.append(f"    WARNING: Could not copy {item_name} — {copy_error}")
+
+                    elif os.path.getmtime(source_file) != os.path.getmtime(prev_file):
+                        # The file's "last modified" timestamp differs from the backup copy.
+                        # shutil.copy2() preserves timestamps, so a difference means the
+                        # operator saved this file in RSLogix 5000 since the last backup.
+                        try:
+                            shutil.copy2(source_file, dest_file)
+                            files_copied += 1
+                            log_lines.append(f"    CHANGED: {item_name}")
+                        except Exception as copy_error:
+                            log_lines.append(f"    WARNING: Could not copy {item_name} — {copy_error}")
+
+                    else:
+                        # The modified timestamp matches — this file has NOT been saved
+                        # since the last backup. Skip copying it and flag it so the
+                        # operator warning popup can alert them to save and re-run.
+                        log_lines.append(f"    UNCHANGED (skipped): {item_name}")
+                        unchanged_acd_files.append(item_name)
 
         log_lines.append(f"  Total files copied: {files_copied}")
         if unchanged_acd_files:
@@ -344,10 +374,11 @@ def copy_files_to_destination(source, dest_root, folder_name, log_lines):
         log_lines.append(f"  ERROR: {error}")
         success = False
 
-    # Keep only the most recently dated .ACD file per processor name
-    unchanged_acd_files = _keep_latest_per_processor(unchanged_acd_files)
+    # Keep only the most recently dated .ACD file per processor name,
+    # but only if that file was not already backed up as NEW or CHANGED this run
+    unchanged_acd_files = _keep_latest_per_processor(unchanged_acd_files, all_acd_files, set())
 
-    return files_copied, success, unchanged_acd_files
+    return files_copied, success, unchanged_acd_files, all_acd_files
 
 
 # =============================================================================
@@ -446,7 +477,7 @@ def run_backup():
     log_lines.append(f"  Destination: {NAS_BACKUP}")
 
     try:
-        nas_count, nas_ok, nas_unchanged = copy_files_to_destination(
+        nas_count, nas_ok, nas_unchanged, nas_all_acd = copy_files_to_destination(
             SOURCE_DIR, NAS_BACKUP, folder_name, log_lines
         )
         if nas_ok:
@@ -460,6 +491,7 @@ def run_backup():
         nas_ok = False
         nas_count = 0       # No files were copied if the whole backup failed
         nas_unchanged = []  # No unchanged list if the whole backup failed
+        nas_all_acd = []    # No processed ACD list if the whole backup failed
 
     # --- Step 4: Copy to local backup ---
     # This runs regardless of what happened with the NAS above
@@ -468,7 +500,7 @@ def run_backup():
     log_lines.append(f"  Destination: {LOCAL_BACKUP}")
 
     try:
-        local_count, local_ok, local_unchanged = copy_files_to_destination(
+        local_count, local_ok, local_unchanged, local_all_acd = copy_files_to_destination(
             SOURCE_DIR, LOCAL_BACKUP, folder_name, log_lines
         )
         if local_ok:
@@ -481,6 +513,7 @@ def run_backup():
         local_ok = False
         local_count = 0       # No files were copied if the whole backup failed
         local_unchanged = []  # No unchanged list if the whole backup failed
+        local_all_acd = []    # No processed ACD list if the whole backup failed
 
     # --- Step 5: Copy the change log CSV into both backup folders ---
     # The change log is maintained by plc_change_watcher.py and records every
@@ -554,8 +587,19 @@ def run_backup():
     # Using union (|) means: if a file is UNCHANGED on either destination,
     # we warn the operator — even if only one destination had a previous backup.
     unchanged_acd_set = set(nas_unchanged) | set(local_unchanged)
-    # Keep only the most recently dated .ACD file per processor name
-    unchanged_acd_set = set(_keep_latest_per_processor(unchanged_acd_set))
+    # Build the full set of ACD filenames processed across both destinations.
+    # Used by _keep_latest_per_processor to find the most recent file per processor.
+    all_acd_set = set(nas_all_acd) | set(local_all_acd)
+    # Files backed up (NEW or CHANGED) on each destination = all processed minus unchanged.
+    # Union gives the set of files backed up on at least one destination this run.
+    nas_backed_up   = set(nas_all_acd)   - set(nas_unchanged)
+    local_backed_up = set(local_all_acd) - set(local_unchanged)
+    backed_up_any   = nas_backed_up | local_backed_up
+    # Keep only the most recently dated .ACD file per processor, and only if
+    # that file was not backed up on any destination this run
+    unchanged_acd_set = set(_keep_latest_per_processor(
+        unchanged_acd_set, all_acd_set, backed_up_any
+    ))
 
     if unchanged_acd_set:
         log_lines.append(
