@@ -5,34 +5,44 @@ Python tool that backs up RSLogix 5000 PLC program files from the
 active program directory to a NAS and a local destination.
 Uses incremental logic for .ACD files and warns the operator
 if programs have not been saved since the last backup.
+Also provides backup_single_file() for on-demand backups triggered
+by the PLC Change Watcher's Backup Now button.
 
 ## Source directory
 C:\PLC\CURRENT_PLC_VIRSION\2026
 
-## Destinations
-- NAS:   Z:\PLC_Programs  (mapped from \\192.168.0.65\Backups)
+## Destinations (on programming terminal — DO NOT CHANGE)
+- NAS:   Z:\PLC_Programs
 - Local: C:\Python\NAS_Backups\PLC
 - Log:   Z:\PLC_Programs\plc_backup_log.txt
 
+## Backup subfolder structure
+Scheduled weekly runs:
+  Z:\PLC_Programs\Scheduled_Backups\PLC_Backup_YYYY-MM-DD_HHMM\
+  C:\Python\NAS_Backups\PLC\Scheduled_Backups\PLC_Backup_YYYY-MM-DD_HHMM\
+
+On-demand runs (Backup Now button from change watcher):
+  Z:\PLC_Programs\On_Demand_Backups\PLC_Backup_YYYY-MM-DD_HHMM\
+  C:\Python\NAS_Backups\PLC\On_Demand_Backups\PLC_Backup_YYYY-MM-DD_HHMM\
+
 ## Files
 - plc_backup.py   — main backup script
-- backup_popup.py — tkinter popup module (warning and success)
+- backup_popup.py — warning, success, and on-demand success popups
 
-## Intended workflow
-1. Backup runs (manually or via Task Scheduler)
-2. Warning popup appears listing the most recent .ACD file
-   per processor that has not changed since the last backup
-3. Operator saves all four programs in RSLogix 5000 (File > Save As)
-   using naming convention: ProgramName_YYYY_MM_DD.ACD
-   Same-day saves use a letter suffix: ProgramName_YYYY_MM_DDa.ACD
+## Intended workflow — scheduled backup
+1. Task Scheduler runs plc_backup.py weekly
+2. Warning popup lists most recent .ACD per processor not saved since last backup
+3. Operator saves programs in RSLogix 5000 (File → Save As)
 4. Operator clicks Run Backup Again
-5. RSLogix creates new dated .ACD files on save
-6. Script detects them as NEW or CHANGED and copies them
-7. Success popup confirms backup complete
+5. Success popup confirms backup complete
 
-The warning popup is a discipline prompt — it fires any time
-the most recent .ACD file per processor has not been saved
-since the last backup. This is by design, not a bug.
+## Intended workflow — on-demand backup
+1. Operator saves a file in RSLogix 5000
+2. Change watcher popup fires
+3. Operator fills in change details and clicks Backup Now
+4. plc_change_watcher.py calls backup_single_file() from this module
+5. Single file backed up to On_Demand_Backups on both destinations
+6. show_on_demand_success() called from backup_popup.py to confirm result
 
 ## Processors backed up (4 total)
 - Rewash
@@ -41,20 +51,15 @@ since the last backup. This is by design, not a bug.
 - UpperLowerPrimaryCrush
 
 ## Incremental logic — .ACD files only
-Each file is compared against its own most recent backup across
-all backup folders (not just the latest folder). This is handled
-by build_file_index() which scans all backup folders newest to
-oldest and maps each filename to its most recent backed-up copy.
+build_file_index() scans BOTH Scheduled_Backups and On_Demand_Backups
+subfolders, newest to oldest, mapping each filename to its most recent
+backed-up copy. Each file is compared against its own most recent backup
+individually — not just the latest folder overall.
 
-- NEW:       file did not exist in any previous backup — copy it
-- CHANGED:   file exists but date modified differs — copy it
-- UNCHANGED: file exists and date modified matches — skip it,
+- NEW:       file not found in any previous backup — copy it
+- CHANGED:   file found but date modified differs — copy it
+- UNCHANGED: file found and date modified matches — skip it,
              flag it in the warning popup
-
-The warning popup only shows the most recent file per processor
-(by date and optional letter suffix). Older saves for the same
-processor are suppressed. If a file was backed up as NEW or
-CHANGED in the current run, it is suppressed from the popup.
 
 ## Non-ACD files (BAK, Recovery)
 Always copied regardless — no incremental logic applied.
@@ -62,16 +67,15 @@ Always copied regardless — no incremental logic applied.
 with a WARNING log entry, this is expected and harmless.
 
 ## Popup display
-Both the warning popup and success popup display on monitor 2
-(right monitor, 1920x1080). Positioning constants are defined
-at the top of backup_popup.py.
+All popups display on monitor 2 (right monitor, 1920x1080).
+Positioning constants are defined at the top of backup_popup.py.
 
 ## Task Scheduler
-Use pythonw.exe (not python.exe) so no terminal window appears.
-Instructions are in the comments at the top of plc_backup.py.
-Terminal must remain logged in — never logs off.
+Weekly schedule. Uses pythonw.exe — no terminal window.
+Terminal must remain logged in at all times.
 
 ## Rules
 - Comment all code in plain English
 - Standard library only — no pip installs
-- Never modify the incremental logic without updating this file
+- Never change destination paths without explicit instruction
+- Never modify incremental logic without updating this file
