@@ -293,6 +293,86 @@ def show_success(nas_ok, local_ok, files_copied):
 
 
 # =============================================================================
+# FUNCTION: show_on_demand_success
+# =============================================================================
+# Opens a confirmation popup after an on-demand backup triggered by the
+# "Backup Now" button in the change watcher. Shows the filename, NAS status,
+# local status, and confirms the change log was saved.
+#
+# Style is identical to show_success() — green header, same fonts, same
+# monitor 2 positioning — so both success popups look consistent.
+#
+# Parameters:
+#   result — the dict returned by backup_single_file():
+#            { "filename", "nas_ok", "local_ok", "nas_path", "local_path" }
+# =============================================================================
+
+def show_on_demand_success(result):
+
+    # --- Step 1: Create the main window ---
+    root = tk.Tk()
+    root.title("Backup Complete")
+    root.geometry("450x270")      # Slightly wider than show_success to fit long filenames
+    root.resizable(False, False)  # Keep layout clean by preventing resizing
+
+    # --- Step 2: "Backup Complete" header in green ---
+    # Green text signals success — same colour and font as the scheduled backup popup
+    header_label = tk.Label(
+        root,
+        text="Backup Complete",
+        fg="green",
+        font=("Arial", 16, "bold"),
+        anchor="center"
+    )
+    header_label.pack(pady=(20, 10))
+
+    # --- Step 3: Summary lines ---
+    nas_status   = "OK" if result["nas_ok"]   else "FAILED"
+    local_status = "OK" if result["local_ok"] else "FAILED"
+
+    # A Frame keeps the summary lines grouped in the centre of the window
+    summary_frame = tk.Frame(root)
+    summary_frame.pack()
+
+    # Four summary lines — file, NAS, local, change log
+    for summary_text in [
+        f"File:        {result['filename']}",
+        f"NAS:         {nas_status}",
+        f"Local:       {local_status}",
+        f"Change log:  Saved",
+    ]:
+        tk.Label(
+            summary_frame,
+            text=summary_text,
+            font=("Arial", 11),
+            justify=tk.LEFT,
+            anchor="w"
+        ).pack(fill="x", padx=20, pady=3)
+
+    # --- Step 4: OK button at the bottom ---
+    # Clicking OK calls root.destroy(), which ends mainloop and closes the window
+    ok_btn = tk.Button(
+        root,
+        text="OK",
+        command=root.destroy,
+        font=("Arial", 10, "bold"),
+        padx=20,
+        pady=5
+    )
+    ok_btn.pack(pady=15)
+
+    # --- Step 5: Position on monitor 2 and start the event loop ---
+    # Identical positioning pattern to show_success()
+    root.update_idletasks()
+    win_w = root.winfo_reqwidth()
+    win_h = root.winfo_reqheight()
+    x = MONITOR_2_X + (MONITOR_2_WIDTH  - win_w) // 2
+    y = MONITOR_2_Y + (MONITOR_2_HEIGHT - win_h) // 2
+    root.geometry(f"+{x}+{y}")
+    root.mainloop()
+
+
+# =============================================================================
 # ENTRY POINT GUARD
 # =============================================================================
 # This module is meant to be imported by plc_backup.py, not run on its own.

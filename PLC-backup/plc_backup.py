@@ -76,6 +76,12 @@ LOG_FILE = r"Z:\PLC_Programs\plc_backup_log.txt"
 # TODO: Update this path if plc_change_watcher.py is ever moved.
 CHANGE_LOG = r"C:\Python\PLC-change-watcher\plc_change_log.csv"
 
+# Subfolder names that separate scheduled and on-demand backup runs.
+# Scheduled runs (Task Scheduler) write into Scheduled_Backups.
+# On-demand runs (Backup Now button) write into On_Demand_Backups.
+SCHEDULED_SUBFOLDER = "Scheduled_Backups"
+ON_DEMAND_SUBFOLDER = "On_Demand_Backups"
+
 
 # =============================================================================
 # FUNCTION: get_timestamp_folder_name
@@ -123,37 +129,30 @@ def find_latest_backup_folder(dest_root):
     # \d{4} means "exactly 4 digits", \d{2} means "exactly 2 digits"
     pattern = re.compile(r"^PLC_Backup_\d{4}-\d{2}-\d{2}_\d{4}$")
 
-    try:
-        # Get a list of everything inside the destination root folder
-        all_entries = os.listdir(dest_root)
-    except Exception:
-        # If the folder doesn't exist yet or can't be read, return None.
-        # This is expected on a first run before any backups have been made.
-        return None
-
-    # Build a list of folder names that match our backup naming pattern
+    # Collect (folder_name, full_path) tuples from BOTH subfolders.
+    # Either subfolder may not exist yet on a first run — skip it gracefully.
     matching = []
-    for entry in all_entries:
-        full_path = os.path.join(dest_root, entry)
-        # Only include it if it is a folder AND its name matches the pattern
-        if os.path.isdir(full_path) and pattern.match(entry):
-            matching.append(entry)
+    for subfolder in (SCHEDULED_SUBFOLDER, ON_DEMAND_SUBFOLDER):
+        subfolder_path = os.path.join(dest_root, subfolder)
+        try:
+            entries = os.listdir(subfolder_path)
+        except Exception:
+            continue  # subfolder doesn't exist yet
+        for entry in entries:
+            full_path = os.path.join(subfolder_path, entry)
+            if os.path.isdir(full_path) and pattern.match(entry):
+                matching.append((entry, full_path))
 
-    # If no matching folders were found, there is no previous backup
+    # If no matching folders were found across either subfolder, there is no previous backup
     if not matching:
         return None
 
-    # Sort alphabetically — because the format is YYYY-MM-DD_HHMM, this puts
-    # the most recent backup last in the list
-    matching.sort()
+    # Sort by folder name — because the format is YYYY-MM-DD_HHMM, alphabetical = chronological
+    matching.sort(key=lambda t: t[0])
 
-    # Walk backwards through the sorted list (most recent first) and return
-    # the first folder that actually contains at least one .ACD file.
-    # This skips folders that were created but received no ACD files (e.g. if
-    # the source was empty or the copy failed), so timestamp comparisons in
-    # copy_files_to_destination compare against a real previous ACD file.
-    for folder_name in reversed(matching):
-        folder_path = os.path.join(dest_root, folder_name)
+    # Walk newest-first and return the first folder that contains at least one .ACD file.
+    # This skips folders that were created but received no ACD files.
+    for _name, folder_path in reversed(matching):
         try:
             contents = os.listdir(folder_path)
         except Exception:
@@ -162,7 +161,7 @@ def find_latest_backup_folder(dest_root):
         if any(f.upper().endswith('.ACD') and 'BAK' not in f.upper() for f in contents):
             return folder_path
 
-    # No backup folder contained any .ACD file — treat as first run
+    # No backup folder in either subfolder contained any .ACD file — treat as first run
     return None
 
 
@@ -192,25 +191,33 @@ def find_latest_backup_folder(dest_root):
 def build_file_index(dest_root):
     pattern = re.compile(r"^PLC_Backup_\d{4}-\d{2}-\d{2}_\d{4}$")
 
-    try:
-        all_entries = os.listdir(dest_root)
-    except Exception:
-        # dest_root doesn't exist yet or can't be read — first run
+    # Collect (folder_name, full_path) tuples from BOTH subfolders so the index
+    # covers every backup run regardless of whether it was scheduled or on-demand.
+    # Either subfolder may not exist yet — skip it gracefully.
+    all_folders = []
+    for subfolder in (SCHEDULED_SUBFOLDER, ON_DEMAND_SUBFOLDER):
+        subfolder_path = os.path.join(dest_root, subfolder)
+        try:
+            entries = os.listdir(subfolder_path)
+        except Exception:
+            continue  # subfolder doesn't exist yet
+        for entry in entries:
+            full_path = os.path.join(subfolder_path, entry)
+            if os.path.isdir(full_path) and pattern.match(entry):
+                all_folders.append((entry, full_path))
+
+    # If neither subfolder has any backup folders, this is a first run
+    if not all_folders:
         return {}
 
-    # Collect matching backup folder names and sort newest-first.
-    # Lexicographic sort works because the format is zero-padded YYYY-MM-DD_HHMM.
-    folders = sorted(
-        (e for e in all_entries
-         if os.path.isdir(os.path.join(dest_root, e)) and pattern.match(e)),
-        reverse=True
-    )
+    # Sort newest-first across both subfolders.
+    # Lexicographic sort is correct because folder names are zero-padded YYYY-MM-DD_HHMM.
+    all_folders.sort(key=lambda t: t[0], reverse=True)
 
-    # Walk folders newest to oldest.  The first time we see a filename, record
-    # its path — that is the most recent backed-up copy of that file.
+    # Walk newest to oldest across both subfolders combined.
+    # The first time we see a filename, record its path — that is the most recent copy.
     index = {}
-    for folder in folders:
-        folder_path = os.path.join(dest_root, folder)
+    for _name, folder_path in all_folders:
         try:
             for filename in os.listdir(folder_path):
                 if filename not in index:
@@ -313,9 +320,9 @@ def _keep_latest_per_processor(unchanged_files, all_acd_files, backed_up_files):
 # =============================================================================
 
 def copy_files_to_destination(source, dest_root, folder_name, log_lines):
-    # Build the full path of the new backup folder
-    # e.g. Z:\PLC_Backups\PLC_Backup_2026-05-17_0200
-    dest_folder = os.path.join(dest_root, folder_name)
+    # Build the full path of the new backup folder inside the Scheduled_Backups subfolder
+    # e.g. Z:\PLC_Programs\Scheduled_Backups\PLC_Backup_2026-05-17_0200
+    dest_folder = os.path.join(dest_root, SCHEDULED_SUBFOLDER, folder_name)
 
     # Build an index mapping each filename to its most recent backed-up copy across
     # ALL previous backup folders.  We do this before creating today's new folder so
@@ -588,7 +595,7 @@ def run_backup():
         (NAS_BACKUP,   "NAS",   prev_nas_backup),
         (LOCAL_BACKUP, "Local", prev_local_backup),
     ]:
-        _dest_folder = os.path.join(_dest_root, folder_name)
+        _dest_folder = os.path.join(_dest_root, SCHEDULED_SUBFOLDER, folder_name)
 
         # If the backup folder was never created (e.g. destination offline), skip
         if not os.path.isdir(_dest_folder):
@@ -671,6 +678,91 @@ def run_backup():
     # Return a tuple so main() has everything it needs to pick the right popup.
     # nas_count + local_count = total copy operations across both destinations.
     return (unchanged_acd_set, nas_ok, local_ok, nas_count)
+
+
+# =============================================================================
+# FUNCTION: backup_single_file
+# =============================================================================
+# Backs up one .ACD file on demand, triggered by the "Backup Now" button in
+# the change watcher popup. Creates a timestamped folder inside On_Demand_Backups
+# on both destinations and copies the .ACD file and the change log CSV to each.
+#
+# Unlike run_backup(), this function copies a single specified file rather than
+# scanning the whole source directory. It does not check for unchanged files
+# and does not show any popup — the caller is responsible for the result popup.
+#
+# Each destination is attempted independently so a NAS failure does not stop
+# the local copy from running.
+#
+# Parameters:
+#   source_path — full path to the .ACD file to back up
+#
+# Returns a dict:
+#   {
+#     "filename":   just the filename (e.g. "Rewash_2026_05_26.ACD"),
+#     "nas_ok":     True if NAS copy succeeded, False otherwise,
+#     "local_ok":   True if local copy succeeded, False otherwise,
+#     "nas_path":   full NAS destination folder path,
+#     "local_path": full local destination folder path,
+#   }
+# =============================================================================
+
+def backup_single_file(source_path):
+    # Build the timestamped folder name — same format used by scheduled runs
+    folder_name     = get_timestamp_folder_name()
+    filename        = os.path.basename(source_path)
+    change_log_name = os.path.basename(CHANGE_LOG)
+
+    # On-demand backups go into the On_Demand_Backups subfolder on each destination
+    nas_folder   = os.path.join(NAS_BACKUP,   ON_DEMAND_SUBFOLDER, folder_name)
+    local_folder = os.path.join(LOCAL_BACKUP, ON_DEMAND_SUBFOLDER, folder_name)
+
+    nas_ok   = False
+    local_ok = False
+
+    log_lines = []
+    log_lines.append(f"On-demand backup triggered for: {filename}")
+    log_lines.append(f"  NAS folder:   {nas_folder}")
+    log_lines.append(f"  Local folder: {local_folder}")
+
+    # --- NAS copy ---
+    # Wrapped in its own try/except so a NAS failure does not prevent the local copy
+    log_lines.append("\n[NAS ON-DEMAND BACKUP]")
+    try:
+        os.makedirs(nas_folder, exist_ok=True)
+        shutil.copy2(source_path, os.path.join(nas_folder, filename))
+        shutil.copy2(CHANGE_LOG,  os.path.join(nas_folder, change_log_name))
+        nas_ok = True
+        log_lines.append(f"  COPIED: {filename}")
+        log_lines.append(f"  COPIED: {change_log_name}")
+    except Exception as e:
+        log_lines.append(f"  ERROR: {e}")
+
+    # --- Local copy ---
+    log_lines.append("\n[LOCAL ON-DEMAND BACKUP]")
+    try:
+        os.makedirs(local_folder, exist_ok=True)
+        shutil.copy2(source_path, os.path.join(local_folder, filename))
+        shutil.copy2(CHANGE_LOG,  os.path.join(local_folder, change_log_name))
+        local_ok = True
+        log_lines.append(f"  COPIED: {filename}")
+        log_lines.append(f"  COPIED: {change_log_name}")
+    except Exception as e:
+        log_lines.append(f"  ERROR: {e}")
+
+    # Log the result summary and append to the shared NAS log file
+    log_lines.append("\n[ON-DEMAND SUMMARY]")
+    log_lines.append(f"  NAS:   {'OK' if nas_ok   else 'FAILED'}")
+    log_lines.append(f"  Local: {'OK' if local_ok else 'FAILED'}")
+    write_log(LOG_FILE, log_lines)
+
+    return {
+        "filename":   filename,
+        "nas_ok":     nas_ok,
+        "local_ok":   local_ok,
+        "nas_path":   nas_folder,
+        "local_path": local_folder,
+    }
 
 
 # =============================================================================

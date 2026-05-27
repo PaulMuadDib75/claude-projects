@@ -21,6 +21,13 @@ import pystray
 from watchdog.observers import Observer
 from watchdog.events import FileSystemEventHandler
 
+# Import the on-demand backup functions from the backup tool.
+# sys.path points to the deployment location of plc_backup.py on this machine.
+import sys
+sys.path.insert(0, r"C:\Python\NAS_Backups")
+from plc_backup import backup_single_file
+from backup_popup import show_on_demand_success
+
 # ---------------------------------------------------------------------------
 # Configuration constants
 # ---------------------------------------------------------------------------
@@ -311,6 +318,52 @@ def show_change_form(root, filepath):
         padx=20,
         pady=8,
         command=on_submit,
+    ).pack(side="left", padx=10)
+
+    def on_backup_now():
+        # Read all fields without validation — blank fields become empty strings in the CSV
+        who         = entry_who.get().strip()
+        routine     = entry_routine.get().strip()
+        rung        = entry_rung.get().strip()
+        description = text_desc.get("1.0", "end-1c").strip()
+        reason      = entry_reason.get().strip()
+        authorized  = entry_auth.get().strip()
+
+        # Write a CSV row immediately — empty strings for any blank fields
+        row = [
+            timestamp_str,
+            who,
+            processor_name,
+            routine,
+            rung,
+            description,
+            reason,
+            authorized,
+            Path(filepath).name,
+        ]
+        with open(LOG_FILE, "a", newline="", encoding="utf-8") as f:
+            csv.writer(f).writerow(row)
+
+        # Run the on-demand backup for the file that triggered this popup
+        result = backup_single_file(filepath)
+
+        # Close the change log form before showing the success popup
+        win.destroy()
+
+        # Show the success popup — tells the operator what was backed up and whether it succeeded
+        show_on_demand_success(result)
+
+    tk.Button(
+        btn_frame,
+        text="Backup Now",
+        font=FONT_BOLD,
+        bg="#0078d4",
+        fg="white",
+        activebackground="#005fa3",
+        activeforeground="white",
+        padx=20,
+        pady=8,
+        command=on_backup_now,
     ).pack(side="left", padx=10)
 
     def on_cancel():
