@@ -1,64 +1,57 @@
 # PLC Change Watcher
 
 ## What this is
-A file watcher tool for Windows 10 that monitors a folder containing RSLogix 5000
-.ACD files. When a file modification is detected, it launches a tkinter popup form
-prompting the operator to document the change. Entries are written to a CSV change log.
+Python tool that monitors RSLogix 5000 .ACD files for saves and prompts
+the operator to document what changed. Entries are written to a CSV log.
+Also integrates with the PLC Backup Tool via a "Backup Now" button.
 
-## Target user
-Plant floor operators — non-technical. No terminal interaction after launch.
-GUI only. Must be simple and obvious to use.
+## Deployment location (programming terminal)
+C:\Python\PLC-change-watcher\
 
-## Environment
-- Windows 10
-- Python 3.14 — pythonw.exe at C:\Users\Administrator\AppData\Local\Programs\Python\Python314\pythonw.exe
-- Python standard library + watchdog, pystray, Pillow (pre-installed via offline pip)
-- Monitor folder: C:\PLC\CURRENT_PLC_VIRSION\2026
-- Four processors — multiple .ACD files exist in the monitored folder
-- Log file: plc_change_log.csv (auto-created in same folder as script)
-- Project folder: C:\claude\projects\plc-change-watcher\
-- Development machine: C:\claude\projects\plc-change-watcher\
-- Production machine: separate machine, same script, different path
+## Watch folder
+C:\PLC\CURRENT_PLC_VIRSION\2026
 
-## Architecture
-- watchdog library for event-driven file change detection
-- Case-sensitive .ACD extension filter — only uppercase .ACD triggers a popup
-  (RSLogix backup files use lowercase .acd and are intentionally ignored)
-- 60-second debounce per file to prevent duplicate popups on rapid saves
-- tkinter for all GUI (popup form only — no main window, no terminal window)
-- win.attributes('-topmost', True) forces popup above all other windows including Wonderware HMI
-- Popup centered on monitor 2 (1920x1080, starts at X=1920)
-- pystray for Windows system tray icon with right-click Exit menu
-- Pillow for programmatic tray icon generation (no external .ico file)
-- csv module for log writing (standard library)
-- Single file: plc_change_watcher.py
-- Three-thread model: main thread (tkinter), watchdog daemon thread, pystray daemon thread
-- Run with pythonw.exe (or .pyw extension) for no-terminal operation
+## Files
+- plc_change_watcher.py  — main script
+- plc_change_log.csv     — auto-created change log (do not delete)
 
-## Form fields
-- Who Made the Change — text entry, required
-- Processor/Program — auto-filled from filename (strip .ACD), read-only
-- Routine — text entry, required
-- Rung — text entry, required
-- Description of Change — multi-line text entry, required
-- Reason for Change — text entry, required
-- Authorized By — text entry, required
-- Date/Time — auto-filled, read-only
+## Popup buttons
+Two buttons appear on the change log form:
 
-## CSV columns
-Timestamp, Who Made the Change, Processor, Routine, Rung,
-Description, Reason, Authorized By, Filename
+- Backup Now — logs the change to CSV (even if form is incomplete)
+              AND backs up the single .ACD file to NAS and local
+              On_Demand_Backups folder. Success popup confirms result.
+- Cancel     — discards everything. Nothing logged, nothing backed up.
+
+The Submit button was removed. Backup Now is the primary action.
+
+## Integration with PLC Backup Tool
+plc_change_watcher.py imports two functions from the backup tool
+using sys.path pointing to the deployment location:
+
+  sys.path.insert(0, r"C:\Python\NAS_Backups")
+  from plc_backup import backup_single_file
+  from backup_popup import show_on_demand_success
+
+DO NOT change these paths without updating the backup tool deployment.
+
+## Backup destinations (on programming terminal — DO NOT CHANGE)
+On-demand backups triggered by Backup Now go to:
+  NAS:   Z:\PLC_Programs\On_Demand_Backups\PLC_Backup_YYYY-MM-DD_HHMM\
+  Local: C:\Python\NAS_Backups\PLC\On_Demand_Backups\PLC_Backup_YYYY-MM-DD_HHMM\
+
+Each on-demand backup folder contains the .ACD file and plc_change_log.csv.
+
+## Monitor
+Popup displays on monitor 2 (right monitor, 1920x1080).
+Positioning constants are at the top of plc_change_watcher.py.
+
+## Task Scheduler
+Runs at logon via Task Scheduler. Uses pythonw.exe — no terminal window.
+Terminal must remain logged in at all times.
 
 ## Rules
-- watchdog for file monitoring — no polling loops
-- Case-sensitive suffix check: Path(path).suffix != ".ACD" — do not use .upper()
-- Standard library + watchdog, pystray, Pillow only — no other third-party packages
-- Large readable fonts — operators are not technical users
-- All fields required — no partial submissions accepted, empty fields highlighted yellow
-- Cancel button must show confirmation dialog before closing without logging
-- Filename in CSV row uses Path(filepath).name — not the full path
-- One popup per file per 60-second window — debounce duplicate save events
-- Comment every section thoroughly
-- tkinter popup must not block the file watcher thread
-- No terminal window in production — run with pythonw.exe or as .pyw
-- No main tkinter window — tray icon is the only persistent visible indicator
+- Comment all code in plain English
+- Do not change backup destination paths without explicit instruction
+- Do not change sys.path import paths without explicit instruction
+- watchdog, pystray, Pillow are required (not standard library)
