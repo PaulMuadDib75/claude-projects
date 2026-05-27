@@ -38,7 +38,7 @@ WATCH_FOLDER = r"C:\PLC\CURRENT_PLC_VIRSION\2026"
 # CSV log file lives in the same folder as this script
 LOG_FILE = Path(__file__).parent / "plc_change_log.csv"
 
-# Column headers for the CSV — order must match the row written in on_submit()
+# Column headers for the CSV — order must match the row written in on_backup_now()
 CSV_HEADERS = [
     "Timestamp",
     "Who Made the Change",
@@ -241,84 +241,10 @@ def show_change_form(root, filepath):
     )
 
     # -----------------------------------------------------------------------
-    # Submit logic — validate, write CSV, confirm, close
-    # -----------------------------------------------------------------------
-    def on_submit():
-        # Collect all field values
-        who = entry_who.get().strip()
-        routine = entry_routine.get().strip()
-        rung = entry_rung.get().strip()
-        description = text_desc.get("1.0", "end-1c").strip()
-        reason = entry_reason.get().strip()
-        authorized = entry_auth.get().strip()
-
-        # Map each value to its widget so we can highlight empty ones
-        field_map = [
-            (who, entry_who),
-            (routine, entry_routine),
-            (rung, entry_rung),
-            (description, text_desc),
-            (reason, entry_reason),
-            (authorized, entry_auth),
-        ]
-
-        # Reset all backgrounds first (in case the user corrected a field)
-        for widget in (entry_who, entry_routine, entry_rung,
-                       text_desc, entry_reason, entry_auth):
-            widget.config(bg="white")
-
-        # Highlight any empty required field
-        missing = False
-        for value, widget in field_map:
-            if not value:
-                widget.config(bg=HIGHLIGHT_BG)
-                missing = True
-
-        if missing:
-            messagebox.showwarning(
-                "Missing Fields",
-                "All fields are required.\n\nPlease fill in the highlighted fields.",
-                parent=win,
-            )
-            return  # Do not close the form
-
-        # All fields present — write one row to the CSV log
-        row = [
-            timestamp_str,
-            who,
-            processor_name,
-            routine,
-            rung,
-            description,
-            reason,
-            authorized,
-            Path(filepath).name,
-        ]
-        with open(LOG_FILE, "a", newline="", encoding="utf-8") as f:
-            csv.writer(f).writerow(row)
-
-        # Confirm and close
-        messagebox.showinfo("Logged", "Change logged successfully.", parent=win)
-        win.destroy()
-
-    # -----------------------------------------------------------------------
-    # Button row — Submit on the left, Cancel on the right
+    # Button row — Backup Now on the left, Cancel on the right
     # -----------------------------------------------------------------------
     btn_frame = tk.Frame(win)
     btn_frame.grid(row=8, column=0, columnspan=2, pady=15)
-
-    tk.Button(
-        btn_frame,
-        text="Submit Change",
-        font=FONT_BOLD,
-        bg="#0078d4",
-        fg="white",
-        activebackground="#005fa3",
-        activeforeground="white",
-        padx=20,
-        pady=8,
-        command=on_submit,
-    ).pack(side="left", padx=10)
 
     def on_backup_now():
         # Read all fields without validation — blank fields become empty strings in the CSV
