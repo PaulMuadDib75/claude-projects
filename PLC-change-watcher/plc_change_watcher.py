@@ -44,6 +44,7 @@ CSV_HEADERS = [
     "Who Made the Change",
     "Processor",
     "Routine",
+    "Equipment Name / Number",
     "Rung",
     "Description",
     "Reason",
@@ -206,61 +207,84 @@ def show_change_form(root, filepath):
     entry_routine = add_entry_row(win, 2, "Routine:")
 
     # -----------------------------------------------------------------------
-    # Field 4 — Rung
+    # Field 4 — Equipment Name / Number
     # -----------------------------------------------------------------------
-    entry_rung = add_entry_row(win, 3, "Rung:")
+    entry_equipment = add_entry_row(win, 3, "Equipment Name / Number:")
 
     # -----------------------------------------------------------------------
-    # Field 5 — Description of Change (multi-line Text widget)
+    # Field 5 — Rung
+    # -----------------------------------------------------------------------
+    entry_rung = add_entry_row(win, 4, "Rung:")
+
+    # -----------------------------------------------------------------------
+    # Field 6 — Description of Change (multi-line Text widget)
     # -----------------------------------------------------------------------
     tk.Label(win, text="Description of Change:", font=FONT_BOLD, anchor="w").grid(
-        row=4, column=0, sticky="nw", **PAD
+        row=5, column=0, sticky="nw", **PAD
     )
     text_desc = tk.Text(win, font=FONT, width=40, height=6, wrap="word")
-    text_desc.grid(row=4, column=1, sticky="ew", **PAD)
+    text_desc.grid(row=5, column=1, sticky="ew", **PAD)
 
     # -----------------------------------------------------------------------
-    # Field 6 — Reason for Change
+    # Field 7 — Reason for Change
     # -----------------------------------------------------------------------
-    entry_reason = add_entry_row(win, 5, "Reason for Change:")
+    entry_reason = add_entry_row(win, 6, "Reason for Change:")
 
     # -----------------------------------------------------------------------
-    # Field 7 — Authorized By
+    # Field 8 — Authorized By
     # -----------------------------------------------------------------------
-    entry_auth = add_entry_row(win, 6, "Authorized By:")
+    entry_auth = add_entry_row(win, 7, "Authorized By:")
 
     # -----------------------------------------------------------------------
-    # Field 8 — Date/Time (read-only, auto-filled)
+    # Field 9 — Date/Time (read-only, auto-filled)
     # -----------------------------------------------------------------------
     tk.Label(win, text="Date / Time:", font=FONT_BOLD, anchor="w").grid(
-        row=7, column=0, sticky="w", **PAD
+        row=8, column=0, sticky="w", **PAD
     )
     tk.Label(win, text=timestamp_str, font=FONT, bg=READONLY_BG,
              anchor="w", relief="sunken", width=40).grid(
-        row=7, column=1, sticky="ew", **PAD
+        row=8, column=1, sticky="ew", **PAD
     )
 
     # -----------------------------------------------------------------------
     # Button row — Backup Now on the left, Cancel on the right
     # -----------------------------------------------------------------------
     btn_frame = tk.Frame(win)
-    btn_frame.grid(row=8, column=0, columnspan=2, pady=15)
+    btn_frame.grid(row=9, column=0, columnspan=2, pady=15)
 
     def on_backup_now():
-        # Read all fields without validation — blank fields become empty strings in the CSV
+        # Read all fields
         who         = entry_who.get().strip()
         routine     = entry_routine.get().strip()
+        equipment   = entry_equipment.get().strip()
         rung        = entry_rung.get().strip()
         description = text_desc.get("1.0", "end-1c").strip()
         reason      = entry_reason.get().strip()
         authorized  = entry_auth.get().strip()
 
-        # Write a CSV row immediately — empty strings for any blank fields
+        # Validate required fields — highlight empty ones yellow and block submission
+        field_map = {
+            entry_routine:   routine,
+            entry_equipment: equipment,
+            entry_rung:      rung,
+        }
+        any_missing = False
+        for widget, value in field_map.items():
+            if value:
+                widget.config(bg="white")
+            else:
+                widget.config(bg=HIGHLIGHT_BG)
+                any_missing = True
+        if any_missing:
+            return
+
+        # Write a CSV row — all required fields are confirmed non-empty
         row = [
             timestamp_str,
             who,
             processor_name,
             routine,
+            equipment,
             rung,
             description,
             reason,
