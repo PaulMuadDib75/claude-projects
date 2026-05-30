@@ -291,6 +291,7 @@ def show_change_form(root, filepath):
             authorized,
             Path(filepath).name,
         ]
+        ensure_csv_headers()
         with open(LOG_FILE, "a", newline="", encoding="utf-8") as f:
             csv.writer(f).writerow(row)
 
